@@ -27,5 +27,9 @@ app.use("/api/cart", cartRouter);
 // Admin Routes
 app.use("/admin/api/products", adminProductRouter);
 
+// Server welcome message
+app.use("/", (req, res) => {
+    res.send("Welcome to the server home page");
+});
 // Server
 app.listen(port, () => console.log(`Server running on port ${port}`));
