@@ -7,7 +7,6 @@ import dotenv from "dotenv";
 import productRouter from "./routes/productRoutes.js";
 import authRouter from "./routes/authRoutes.js";
 import cartRouter from "./routes/cartRoutes.js";
-
 import adminProductRouter from "./admin/routes/adminProductRouter.js";
 
 // Base setup
@@ -28,8 +27,8 @@ app.use("/api/cart", cartRouter);
 app.use("/admin/api/products", adminProductRouter);
 
 // Server welcome message
-app.use("/", (req, res) => {
-    res.send("Welcome to the server home page");
-});
+// app.use("/", (req, res) => {
+//     res.send("Welcome to the server home page");
+// });
 // Server
 app.listen(port, () => console.log(`Server running on port ${port}`));
