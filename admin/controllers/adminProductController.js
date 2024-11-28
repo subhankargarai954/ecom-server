@@ -14,6 +14,7 @@ const isImageLoadable = async (url) => {
 };
 
 const getAllProducts = async (req, res) => {
+    console.log(`getAllProducs`);
     try {
         const response = await pool.query(`select * from product`);
         response.rowCount && res.send({ products: response.rows });
