@@ -1,3 +1,5 @@
+// adminProductController.js
+
 import pool from "../../config/pool.js";
 import axios from "axios";
 

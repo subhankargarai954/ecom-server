@@ -1,3 +1,5 @@
+// productController.js
+
 import pool from "../config/pool.js";
 
 const getAllCategory = async (req, res) => {

@@ -1,3 +1,5 @@
+// authController.js
+
 import pool from "../config/pool.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";

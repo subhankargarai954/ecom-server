@@ -1,3 +1,5 @@
+// adminProductRouter.js
+
 import express from "express";
 
 import {

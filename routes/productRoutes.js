@@ -1,3 +1,5 @@
+// productRouter.js
+
 import express from "express";
 
 import {
@@ -18,4 +20,3 @@ productRouter.get("/product/images/:id", getProductImages);
 productRouter.get("/categoryname/:id", getCategoryName);
 
 export default productRouter;
- 
