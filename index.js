@@ -9,6 +9,8 @@ import authRouter from "./routes/authRoutes.js";
 import cartRouter from "./routes/cartRoutes.js";
 import adminProductRouter from "./admin/routes/adminProductRouter.js";
 
+import { sequelize } from "./models/index.js";
+
 // Base setup
 const app = express();
 dotenv.config();
@@ -30,5 +32,12 @@ app.use("/admin/api/products", adminProductRouter);
 // app.use("/", (req, res) => {
 //     res.send("Welcome to the server home page");
 // });
+
+// ORM DB connection
+sequelize
+    .authenticate()
+    .then(() => console.log("Database connected (Sequelize)"))
+    .catch((err) => console.log(`Database connection error: ${err}`));
+
 // Server
 app.listen(port, () => console.log(`Server running on port ${port}`));
