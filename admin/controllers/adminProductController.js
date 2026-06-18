@@ -6,143 +6,111 @@ import axios from "axios";
 const isImageLoadable = async (url) => {
     try {
         const response = await axios.get(url, { responseType: "arraybuffer" });
-        return (
-            response.status === 200 // &&
-            // response.headers["Content-Type"].startsWith("image/")
-        );
+        return response.status === 200;
     } catch (error) {
         return false;
     }
 };
 
 const getAllProducts = async (req, res) => {
-    console.log(`getAllProducs`);
     try {
         const response = await pool.query(`select * from product`);
-        response.rowCount && res.send({ products: response.rows });
+        return res.json({ products: response.rows });
     } catch (error) {
-        console.dir(error, { depth: null });
+        console.error(`getAllProducts error: ${error.message}`);
+        return res.status(500).json({ error: "Failed to fetch products" });
     }
 };
 
 const getCategoryName = async (req, res) => {
     const categoryId = req.params.id;
-
     try {
         const response = await pool.query(
             `select name from category where id = $1`,
             [categoryId]
         );
-
-        // console.dir(response.rows[0], { depth: null });
-        response.rowCount && res.send(response.rows[0]);
+        if (!response.rowCount)
+            return res.status(404).json({ error: "Category not found" });
+        return res.json(response.rows[0]);
     } catch (error) {
-        console.dir(error, { depth: null });
+        console.error(`getCategoryName error: ${error.message}`);
+        return res.status(500).json({ error: "Failed to fetch category" });
     }
 };
 
 const getProductImages = async (req, res) => {
     const productId = req.params.id;
-
     try {
         const response = await pool.query(
             `select image_url from product_img where id = $1`,
             [productId]
         );
-        // console.dir(response.rows);
-
-        res.send(response.rows);
-        // console.log(`response sent`);
-    } catch (error) {}
+        return res.json(response.rows);
+    } catch (error) {
+        console.error(`getProductImages error: ${error.message}`);
+        return res.status(500).json({ error: "Failed to fetch product images" });
+    }
 };
 
 const getAllCategoryName = async (req, res) => {
     try {
         const response = await pool.query(`select * from category`);
-
-        // console.dir(response.rows, { depth: null });
-        res.send({ categories: response.rows });
+        return res.json({ categories: response.rows });
     } catch (error) {
-        console.dir(error, { depth: null });
+        console.error(`getAllCategoryName error: ${error.message}`);
+        return res.status(500).json({ error: "Failed to fetch categories" });
     }
 };
 
 const storeProduct = async (req, res) => {
-    const {
-        prodId,
-        prodName,
-        prodImage,
-        prodPrice,
-        prodCategoryId,
-        prodDetails,
-    } = req.body;
-    console.dir(req.body, { depth: null });
+    const { prodId, prodName, prodImage, prodPrice, prodCategoryId, prodDetails } =
+        req.body;
 
-    // if the product already exists then update
     if (prodId) {
-        // console.log(`update product - ${prodId}`);
         try {
             const response = await pool.query(
                 `update product set name = $1, image = $2, price = $3, more_info = $4, category_id = $5 where id = $6 returning *`,
-                [
-                    prodName,
-                    prodImage,
-                    prodPrice,
-                    prodDetails,
-                    prodCategoryId,
-                    prodId,
-                ]
+                [prodName, prodImage, prodPrice, prodDetails, prodCategoryId, prodId]
             );
-            console.dir(response.rows[0], { depth: null });
-            return res.send({ product: response.rows[0] });
+            return res.json({ product: response.rows[0] });
         } catch (error) {
-            console.dir(error, { depth: null });
-            res.send({ error: error });
+            console.error(`storeProduct update error: ${error.message}`);
+            return res.status(500).json({ error: error.message });
         }
     } else {
-        // if the product doesn't exist then create new product
         try {
             const response = await pool.query(
                 `insert into product (name, image, category_id, price, more_info) values($1, $2, $3, $4, $5) returning *`,
                 [prodName, prodImage, prodCategoryId, prodPrice, prodDetails]
             );
-            if (response.rowCount) {
-                // console.dir(response.rows[0]);
-                return res.send({ product: response.rows[0] });
-            } else return res.send({ error: "Error adding Product" });
+            if (response.rowCount)
+                return res.json({ product: response.rows[0] });
+            else
+                return res.status(500).json({ error: "Error adding Product" });
         } catch (error) {
-            console.log(error);
+            console.error(`storeProduct insert error: ${error.message}`);
+            return res.status(500).json({ error: error.message });
         }
     }
 };
 
 const storeProductImages = async (req, res) => {
     const { images, productId } = req.body;
-    console.dir(req.body, { depth: null });
 
     try {
-        // Check if images exist for the productId
-        const response = await pool.query(
+        const existing = await pool.query(
             `SELECT * FROM product_img WHERE id = $1`,
             [productId]
         );
-
-        // If images exist, delete them
-        if (response.rowCount > 0) {
-            console.log(`Deleting existing images for productId: ${productId}`);
-            await pool.query(`DELETE FROM product_img WHERE id = $1`, [
-                productId,
-            ]);
+        if (existing.rowCount > 0) {
+            await pool.query(`DELETE FROM product_img WHERE id = $1`, [productId]);
         }
 
-        // Validate the new images
         const loadableImages = [];
         for (const imageUrl of images) {
             if (await isImageLoadable(imageUrl)) loadableImages.push(imageUrl);
         }
-        console.dir(loadableImages, { depth: null });
 
-        // Insert the new images
         try {
             const allInsertedImages = (
                 await Promise.all(
@@ -151,44 +119,35 @@ const storeProductImages = async (req, res) => {
                             `INSERT INTO product_img (id, image_url) VALUES ($1, $2) ON CONFLICT (id, image_url) DO NOTHING RETURNING *`,
                             [productId, image_url]
                         );
-                        console.dir(
-                            "response.rows[0]",
-                            insertResponse.rows[0],
-                            {
-                                depth: null,
-                            }
-                        );
-                        if (insertResponse.rowCount)
-                            return insertResponse.rows[0].image_url;
-                        else return null;
+                        return insertResponse.rowCount
+                            ? insertResponse.rows[0].image_url
+                            : null;
                     })
                 )
             ).filter((image) => image !== null);
 
-            console.dir(allInsertedImages, { depth: null });
-            res.send({ images: allInsertedImages });
+            return res.json({ images: allInsertedImages });
         } catch (error) {
-            console.error("Error inserting images:", error);
-            res.send({ error });
+            console.error(`storeProductImages insert error: ${error.message}`);
+            return res.status(500).json({ error: error.message });
         }
     } catch (error) {
-        console.error("Error checking existing images:", error);
-        res.send({ error });
+        console.error(`storeProductImages error: ${error.message}`);
+        return res.status(500).json({ error: error.message });
     }
 };
 
 const deleteProduct = async (req, res) => {
     const prodId = parseInt(req.params.id, 10);
-    console.log(prodId);
-
     try {
         const response = await pool.query(
             `delete from product where id = $1 returning *`,
             [prodId]
         );
-        res.send({ product: response.rows[0] });
+        return res.json({ product: response.rows[0] });
     } catch (error) {
-        console.log(error);
+        console.error(`deleteProduct error: ${error.message}`);
+        return res.status(500).json({ error: error.message });
     }
 };
 
