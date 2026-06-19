@@ -1,35 +1,18 @@
-// pool.js
-import pkg from "pg";
-const { Pool } = pkg;
-import dotenv from "dotenv";
+// config/pool.js
+// Neon's Pool is API-compatible with pg.Pool — no changes needed in controllers.
 
+import dotenv from "dotenv";
 dotenv.config();
 
-const useDatabaseUrl = !!process.env.DATABASE_URL;
-const enableSsl = process.env.DB_SSL === "true" || false;
+import { neonConfig, Pool } from "@neondatabase/serverless";
+import ws from "ws";
 
-const poolConfig = useDatabaseUrl
-    ? {
-          connectionString: process.env.DATABASE_URL,
-          ssl: enableSsl ? { rejectUnauthorized: false } : false,
-      }
-    : {
-          user: process.env.DB_USER,
-          host: process.env.DB_HOST,
-          database: process.env.DB_NAME,
-          password: process.env.DB_PASSWORD,
-          port: process.env.DB_PORT ? Number(process.env.DB_PORT) : undefined,
-          ssl: enableSsl ? { rejectUnauthorized: false } : false,
-      };
+// Required for Neon WebSocket connections in Node.js
+neonConfig.webSocketConstructor = ws;
 
-const pool = new Pool(poolConfig);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-pool.on("connect", () => {
-    console.log(`Connected to the database`);
-});
-
-pool.on("error", (err) => {
-    console.log(`Error connecting to the database : ${err}`);
-});
+pool.on("connect", () => console.log("Connected to Neon database (pool)"));
+pool.on("error", (err) => console.error(`Pool error: ${err.message}`));
 
 export default pool;
