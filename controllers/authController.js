@@ -1,74 +1,81 @@
-// authController.js
-
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 dotenv.config();
 
-import { Users } from "../models/index.js";
+import { User } from "../models/index.js";
 
 const signup = async (req, res) => {
-    const { name, phone, password, address } = req.body;
+    const { name, phone, password, address, email } = req.body;
+    if (!name || !phone || !password)
+        return res.status(400).json({ error: "Name, phone, and password are required." });
 
     try {
-        const phoneExists = await Users.findOne({ where: { phone } });
-        if (phoneExists)
-            return res.status(400).json({
-                error: `Phone number already exists. Please try logging in`,
-            });
+        const exists = await User.findOne({ where: { phone } });
+        if (exists)
+            return res.status(400).json({ error: "Phone number already registered. Please log in." });
 
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = await Users.create({
-            name,
-            phone,
-            hashedpassword: hashedPassword,
-            address,
-        });
-
-        if (!newUser)
-            return res.status(500).json({ error: `Unable to register User.` });
+        const hashed_password = await bcrypt.hash(password, 10);
+        const user = await User.create({ name, phone, email, hashed_password, address, role: "customer" });
 
         const token = jwt.sign(
-            { id: newUser.id, name: newUser.name },
+            { id: user.id, name: user.name, role: user.role },
             process.env.JWT_SECRET,
-            { expiresIn: "1h" }
+            { expiresIn: "7d" }
         );
-
-        return res.json({
-            token,
-            message: `Signup successful. Login with phone & password`,
-        });
-    } catch (error) {
-        console.error(`Signup error: ${error.message}`);
-        return res.status(500).json({ error: `Unable to register User.` });
+        return res.json({ token, user: { id: user.id, name: user.name, phone: user.phone, role: user.role } });
+    } catch (err) {
+        console.error("signup error:", err.message);
+        return res.status(500).json({ error: "Registration failed." });
     }
 };
 
 const login = async (req, res) => {
     const { phone, password } = req.body;
+    if (!phone || !password)
+        return res.status(400).json({ error: "Phone and password are required." });
 
     try {
-        const existingUser = await Users.findOne({ where: { phone } });
+        const user = await User.findOne({ where: { phone } });
+        if (!user)
+            return res.status(401).json({ error: "Phone number not registered." });
 
-        if (!existingUser)
-            return res.status(401).json({ error: `Phone No not registered` });
-
-        const isMatch = await bcrypt.compare(password, existingUser.hashedpassword);
-
-        if (!isMatch)
-            return res.status(401).json({ error: `Incorrect Password` });
+        const match = await bcrypt.compare(password, user.hashed_password);
+        if (!match)
+            return res.status(401).json({ error: "Incorrect password." });
 
         const token = jwt.sign(
-            { id: existingUser.id, name: existingUser.name },
+            { id: user.id, name: user.name, role: user.role },
             process.env.JWT_SECRET,
-            { expiresIn: "1h" }
+            { expiresIn: "7d" }
         );
-
-        return res.json({ token });
-    } catch (error) {
-        console.error(`Login error: ${error.message}`);
-        return res.status(500).json({ error: `Unknown error logging in` });
+        return res.json({ token, user: { id: user.id, name: user.name, phone: user.phone, email: user.email, role: user.role } });
+    } catch (err) {
+        console.error("login error:", err.message);
+        return res.status(500).json({ error: "Login failed." });
     }
 };
 
-export { signup, login };
+const getProfile = async (req, res) => {
+    try {
+        const user = await User.findByPk(req.user.id, {
+            attributes: ["id", "name", "phone", "email", "address", "role", "created_at"],
+        });
+        if (!user) return res.status(404).json({ error: "User not found." });
+        return res.json({ user });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to fetch profile." });
+    }
+};
+
+const updateProfile = async (req, res) => {
+    const { name, email, address } = req.body;
+    try {
+        await User.update({ name, email, address }, { where: { id: req.user.id } });
+        return res.json({ message: "Profile updated." });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to update profile." });
+    }
+};
+
+export { signup, login, getProfile, updateProfile };

@@ -1,26 +1,29 @@
-// adminProductRouter.js
-
 import express from "express";
-
 import {
-    getAllProducts,
-    getCategoryName,
-    getProductImages,
-    getAllCategoryName,
-    storeProduct,
-    storeProductImages,
-    deleteProduct,
+    getAllProducts, getProductById, createProduct, updateProduct, deleteProduct,
+    addVariant, updateVariant, deleteVariant,
+    uploadImages, setCoverImage, deleteImage,
 } from "../controllers/adminProductController.js";
+import { adminMiddleware } from "../../middleware/adminMiddleware.js";
+import { upload } from "../../middleware/upload.js";
 
-const adminProductRouter = express.Router();
+const router = express.Router();
+router.use(adminMiddleware);
 
-adminProductRouter.get("/", getAllProducts);
-adminProductRouter.get("/category", getAllCategoryName);
-adminProductRouter.get("/category/:id", getCategoryName);
-adminProductRouter.get("/productimage/:id", getProductImages);
-adminProductRouter.post("/", storeProduct);
-adminProductRouter.post("/otherimages", storeProductImages);
+router.get("/", getAllProducts);
+router.get("/:id", getProductById);
+router.post("/", createProduct);
+router.put("/:id", updateProduct);
+router.delete("/:id", deleteProduct);
 
-adminProductRouter.delete("/:id", deleteProduct);
+// Variant routes
+router.post("/:id/variants", addVariant);
+router.put("/:id/variants/:variant_id", updateVariant);
+router.delete("/:id/variants/:variant_id", deleteVariant);
 
-export default adminProductRouter;
+// Image routes
+router.post("/:id/images", upload.array("images", 10), uploadImages);
+router.put("/:id/images/cover", setCoverImage);
+router.delete("/:id/images/:image_id", deleteImage);
+
+export default router;

@@ -1,89 +1,57 @@
-// productController.js
+import { Op } from "sequelize";
+import { Product, ProductVariant, ProductImage, Category } from "../models/index.js";
 
-import { Category, CategoryImg, Product, ProductImg } from "../models/index.js";
+const getProducts = async (req, res) => {
+    const { category_id, search, page = 1, limit = 20 } = req.query;
+    const where = { is_active: true };
+    if (category_id) where.category_id = category_id;
+    if (search) where.name = { [Op.iLike]: `%${search}%` };
 
-const getAllCategory = async (req, res) => {
     try {
-        let response = await Category.findAll({
+        const offset = (parseInt(page) - 1) * parseInt(limit);
+        const { count, rows } = await Product.findAndCountAll({
+            where,
             include: [
-                {
-                    model: CategoryImg,
-                    as: "category_images",
-                    attributes: ["image_url"],
-                },
+                { model: ProductImage, as: "images", where: { is_cover: true }, required: false },
+                { model: ProductVariant, as: "variants", where: { is_active: true }, required: false },
+                { model: Category, as: "category", attributes: ["id", "name"] },
             ],
-            order: [["id", "ASC"]],
+            limit: parseInt(limit),
+            offset,
+            order: [["created_at", "DESC"]],
         });
+        return res.json({ products: rows, total: count, page: parseInt(page), limit: parseInt(limit) });
+    } catch (err) {
+        console.error("getProducts error:", err.message);
+        return res.status(500).json({ error: "Failed to fetch products." });
+    }
+};
 
-        response = response.map((category) => {
-            const categoryJson = category.toJSON();
-            categoryJson.images = (categoryJson.category_images || []).map(
-                (row) => row.image_url
-            );
-            delete categoryJson.category_images;
-            return categoryJson;
+const getProductById = async (req, res) => {
+    try {
+        const product = await Product.findOne({
+            where: { id: req.params.id, is_active: true },
+            include: [
+                { model: ProductImage, as: "images", order: [["display_order", "ASC"]] },
+                { model: ProductVariant, as: "variants", where: { is_active: true }, required: false },
+                { model: Category, as: "category", attributes: ["id", "name"] },
+            ],
         });
-
-        return res.json(response);
-    } catch (error) {
-        console.error(`getAllCategory error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch categories" });
+        if (!product) return res.status(404).json({ error: "Product not found." });
+        return res.json({ product });
+    } catch (err) {
+        console.error("getProductById error:", err.message);
+        return res.status(500).json({ error: "Failed to fetch product." });
     }
 };
 
-const getAllByCategoryId = async (req, res) => {
-    const { id } = req.params;
+const getCategories = async (req, res) => {
     try {
-        const response = await Product.findAll({ where: { category_id: id } });
-        return res.json(response);
-    } catch (error) {
-        console.error(`getAllByCategoryId error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch products" });
+        const categories = await Category.findAll({ order: [["name", "ASC"]] });
+        return res.json({ categories });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to fetch categories." });
     }
 };
 
-const getProductDetails = async (req, res) => {
-    const { id } = req.params;
-    try {
-        const response = await Product.findByPk(id);
-        if (!response) return res.status(404).json({ error: "Product not found" });
-        return res.json(response);
-    } catch (error) {
-        console.error(`getProductDetails error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch product" });
-    }
-};
-
-const getProductImages = async (req, res) => {
-    const { id } = req.params;
-    try {
-        const response = await ProductImg.findAll({
-            where: { id },
-            attributes: ["image_url"],
-        });
-        return res.json(response);
-    } catch (error) {
-        console.error(`getProductImages error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch product images" });
-    }
-};
-
-const getCategoryName = async (req, res) => {
-    const { id } = req.params;
-    try {
-        const response = await Category.findByPk(id, { attributes: ["name"] });
-        if (!response) return res.json([]);
-        return res.json([{ name: response.name }]);
-    } catch (error) {
-        console.error(`getCategoryName error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch category name" });
-    }
-};
-
-export {
-    getAllByCategoryId,
-    getAllCategory,
-    getProductDetails,
-    getProductImages,
-    getCategoryName,
-};
+export { getProducts, getProductById, getCategories };

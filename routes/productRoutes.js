@@ -1,22 +1,10 @@
-// productRouter.js
-
 import express from "express";
+import { getProducts, getProductById, getCategories } from "../controllers/productController.js";
 
-import {
-    getAllCategory,
-    getAllByCategoryId,
-    getProductDetails,
-    getProductImages,
-    getCategoryName,
-} from "../controllers/productController.js";
+const router = express.Router();
 
-const productRouter = express.Router();
+router.get("/", getProducts);
+router.get("/categories", getCategories);
+router.get("/:id", getProductById);
 
-// Defining category routes
-productRouter.get("/categories", getAllCategory);
-productRouter.get("/categories/:id", getAllByCategoryId);
-productRouter.get("/product/images/:id", getProductImages);
-productRouter.get("/product/:id", getProductDetails);
-productRouter.get("/categoryname/:id", getCategoryName);
-
-export default productRouter;
+export default router;
