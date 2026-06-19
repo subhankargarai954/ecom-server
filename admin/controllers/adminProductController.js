@@ -35,15 +35,15 @@ const getProductById = async (req, res) => {
 };
 
 const createProduct = async (req, res) => {
-    const { name, category_id, base_price, discount_percent, description, available_quantity, variants } = req.body;
+    const { name, name_bn, category_id, base_price, discount_percent, description, description_bn, available_quantity, variants } = req.body;
     if (!name || !base_price) return res.status(400).json({ error: "Name and base price are required." });
 
     const t = await sequelize.transaction();
     try {
         const product = await Product.create({
-            name, category_id: category_id || null,
+            name, name_bn, category_id: category_id || null,
             base_price, discount_percent: discount_percent || 0,
-            description, available_quantity: available_quantity || 0,
+            description, description_bn, available_quantity: available_quantity || 0,
         }, { transaction: t });
 
         if (variants && Array.isArray(variants) && variants.length > 0) {
@@ -70,10 +70,10 @@ const createProduct = async (req, res) => {
 };
 
 const updateProduct = async (req, res) => {
-    const { name, category_id, base_price, discount_percent, description, available_quantity, is_active } = req.body;
+    const { name, name_bn, category_id, base_price, discount_percent, description, description_bn, available_quantity, is_active } = req.body;
     try {
         const [updated] = await Product.update({
-            name, category_id, base_price, discount_percent, description, available_quantity, is_active,
+            name, name_bn, category_id, base_price, discount_percent, description, description_bn, available_quantity, is_active,
             updated_at: new Date(),
         }, { where: { id: req.params.id } });
 

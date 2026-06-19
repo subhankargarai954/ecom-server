@@ -187,9 +187,9 @@ CREATE INDEX idx_order_items_order    ON order_items(order_id);
 -- No admin is seeded here. After running this migration, create your
 -- first admin via the setup endpoint (password is hashed by the server):
 --
-  curl -X POST http://localhost:5000/admin/api/auth/setup \
-    -H "Content-Type: application/json" \
-    -d '{"name":"Admin","phone":"9876543210","password":"Admin@123","setup_key":"my_S3cret_K3y_8f2kd9"}'
+--   curl -X POST http://localhost:5000/admin/api/auth/setup \
+--     -H "Content-Type: application/json" \
+--     -d '{"name":"Admin","phone":"9876543210","password":"Admin@123","setup_key":"<ADMIN_SETUP_KEY from .env>"}'
 --
 -- Then log in to the admin portal with that phone + password.
 -- =============================================================

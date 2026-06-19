@@ -14,7 +14,7 @@ const getProducts = async (req, res) => {
             include: [
                 { model: ProductImage, as: "images", where: { is_cover: true }, required: false },
                 { model: ProductVariant, as: "variants", where: { is_active: true }, required: false },
-                { model: Category, as: "category", attributes: ["id", "name"] },
+                { model: Category, as: "category", attributes: ["id", "name", "name_bn"] },
             ],
             limit: parseInt(limit),
             offset,
@@ -34,7 +34,7 @@ const getProductById = async (req, res) => {
             include: [
                 { model: ProductImage, as: "images", order: [["display_order", "ASC"]] },
                 { model: ProductVariant, as: "variants", where: { is_active: true }, required: false },
-                { model: Category, as: "category", attributes: ["id", "name"] },
+                { model: Category, as: "category", attributes: ["id", "name", "name_bn"] },
             ],
         });
         if (!product) return res.status(404).json({ error: "Product not found." });

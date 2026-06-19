@@ -10,10 +10,10 @@ const getAllCategories = async (req, res) => {
 };
 
 const createCategory = async (req, res) => {
-    const { name, image_url } = req.body;
+    const { name, name_bn, image_url } = req.body;
     if (!name) return res.status(400).json({ error: "Category name is required." });
     try {
-        const category = await Category.create({ name, image_url });
+        const category = await Category.create({ name, name_bn, image_url });
         return res.status(201).json({ category });
     } catch (err) {
         return res.status(500).json({ error: "Failed to create category." });
@@ -21,9 +21,9 @@ const createCategory = async (req, res) => {
 };
 
 const updateCategory = async (req, res) => {
-    const { name, image_url } = req.body;
+    const { name, name_bn, image_url } = req.body;
     try {
-        const [updated] = await Category.update({ name, image_url }, { where: { id: req.params.id } });
+        const [updated] = await Category.update({ name, name_bn, image_url }, { where: { id: req.params.id } });
         if (!updated) return res.status(404).json({ error: "Category not found." });
         const category = await Category.findByPk(req.params.id);
         return res.json({ category });
