@@ -1,12 +1,8 @@
 import PDFDocument from "pdfkit";
 
-// Builds a professional invoice PDF (English) and streams it to `res`.
-// The fully bilingual (EN + বাংলা) bill is rendered by the printable web page;
-// this server PDF is the reliable, storable one-click download.
-export function streamInvoicePdf(order, res) {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
-    doc.pipe(res);
-
+// Renders the invoice body onto a PDFDocument. Shared by the streaming
+// (HTTP download) and buffer (WhatsApp attachment) variants below.
+function renderInvoice(doc, order) {
     const inr = (n) => "Rs. " + Number(n).toFixed(2);
     const items = order.items || [];
     const total = parseFloat(order.total_amount);
@@ -82,6 +78,28 @@ export function streamInvoicePdf(order, res) {
     doc.moveDown(1.5);
     doc.fontSize(8).fillColor("#999")
         .text("This is a computer-generated invoice. Thank you for your business.", 50, doc.y, { align: "center", width: 495 });
+}
 
+// Builds the invoice PDF (English) and streams it to `res`.
+// The fully bilingual (EN + বাংলা) bill is rendered by the printable web page;
+// this server PDF is the reliable, storable one-click download.
+export function streamInvoicePdf(order, res) {
+    const doc = new PDFDocument({ size: "A4", margin: 50 });
+    doc.pipe(res);
+    renderInvoice(doc, order);
     doc.end();
+}
+
+// Builds the same invoice PDF and resolves with a Buffer. Used to upload the
+// bill to Cloudinary so it can be attached to a WhatsApp message.
+export function invoicePdfBuffer(order) {
+    return new Promise((resolve, reject) => {
+        const doc = new PDFDocument({ size: "A4", margin: 50 });
+        const chunks = [];
+        doc.on("data", (c) => chunks.push(c));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+        renderInvoice(doc, order);
+        doc.end();
+    });
 }

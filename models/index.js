@@ -10,6 +10,7 @@ import Order from "./Order.js";
 import OrderItem from "./OrderItem.js";
 import Payment from "./Payment.js";
 import Notification from "./Notification.js";
+import MessageLog from "./MessageLog.js";
 
 // Category → Product
 Category.hasMany(Product, { foreignKey: "category_id", as: "products", onDelete: "SET NULL" });
@@ -59,6 +60,10 @@ Payment.belongsTo(Order, { foreignKey: "order_id", as: "order" });
 Order.hasMany(Notification, { foreignKey: "order_id", as: "notifications" });
 Notification.belongsTo(Order, { foreignKey: "order_id", as: "order" });
 
+// Order → MessageLog (SMS / WhatsApp history)
+Order.hasMany(MessageLog, { foreignKey: "order_id", as: "messages" });
+MessageLog.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+
 export {
     sequelize,
     User,
@@ -71,4 +76,5 @@ export {
     OrderItem,
     Payment,
     Notification,
+    MessageLog,
 };

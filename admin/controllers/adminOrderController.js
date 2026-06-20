@@ -1,6 +1,8 @@
-import { sequelize, Order, OrderItem, Payment, Product, ProductVariant, ProductImage, User } from "../../models/index.js";
+import { sequelize, Order, OrderItem, Payment, Product, ProductVariant, ProductImage, User, MessageLog } from "../../models/index.js";
 import { confirmAdvanceAndProgress } from "../../controllers/orderController.js";
 import { releaseStock, notifyAdmin, genSlipNo, genInvoiceNo } from "../../services/orderHelpers.js";
+import { dispatchOrderEvent, dispatchOrderEventSync } from "../../services/notify.js";
+import { isLive } from "../../services/messagingService.js";
 
 const ORDER_INCLUDE = [
     { model: User, as: "user", attributes: ["id", "name", "phone", "email", "address"] },
@@ -68,6 +70,7 @@ const confirmAdvance = async (req, res) => {
 
         await confirmAdvanceAndProgress(order, advance, "cash", t);
         await t.commit();
+        dispatchOrderEvent("advance_confirmed", order.id);
         return res.json({ message: "Advance confirmed. Order placed.", order_id: order.id });
     } catch (err) {
         await t.rollback();
@@ -111,6 +114,7 @@ const markReady = async (req, res) => {
             updated_at: new Date(),
         });
         await notifyAdmin("ready", `Order #${order.id} ready`, `Order #${order.id} is ready for pickup.`, order.id);
+        dispatchOrderEvent("order_ready", order.id);
         return res.json({ message: "Order marked ready for pickup.", order });
     } catch (err) {
         return res.status(500).json({ error: "Failed to mark ready." });
@@ -158,6 +162,7 @@ const markDelivered = async (req, res) => {
         }, { transaction: t });
 
         await t.commit();
+        dispatchOrderEvent("order_completed", order.id);
         return res.json({
             message: "Delivery recorded.",
             pending_amount: Math.max(0, pending).toFixed(2),
@@ -256,6 +261,7 @@ const collectDue = async (req, res) => {
             updated_at: new Date(),
         }, { transaction: t });
         await t.commit();
+        dispatchOrderEvent("payment_received", order.id, { amount: collected });
         return res.json({
             message: stillPending <= 0.01 ? "Payment fully collected." : `Partial. Still pending: ₹${stillPending.toFixed(2)}`,
             still_pending: Math.max(0, stillPending).toFixed(2),
@@ -266,9 +272,37 @@ const collectDue = async (req, res) => {
     }
 };
 
+// SMS / WhatsApp notification history for an order.
+const getOrderMessages = async (req, res) => {
+    try {
+        const messages = await MessageLog.findAll({
+            where: { order_id: req.params.id },
+            order: [["created_at", "DESC"]],
+        });
+        return res.json({ messages, live: isLive() });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to load messages." });
+    }
+};
+
+// Re-send a notification for an order (e.g. resend the bill on WhatsApp).
+const resendMessage = async (req, res) => {
+    const { event = "order_completed" } = req.body;
+    const allowed = ["order_placed", "advance_confirmed", "order_ready", "order_completed"];
+    if (!allowed.includes(event)) return res.status(400).json({ error: "Invalid event." });
+    try {
+        const result = await dispatchOrderEventSync(event, req.params.id);
+        if (!result.ok) return res.status(400).json({ error: result.error });
+        return res.json({ message: "Notification re-sent.", ...result });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to resend notification." });
+    }
+};
+
 export {
     getAllOrders, getOrderById,
     confirmAdvance, startProduction, markReady, markDelivered,
     adminCancelOrder, markRefundIssued,
     getPendingDues, collectDue,
+    getOrderMessages, resendMessage,
 };

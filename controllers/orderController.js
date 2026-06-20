@@ -1,6 +1,7 @@
 import { sequelize, Cart, Order, OrderItem, Payment, Product, ProductVariant, ProductImage } from "../models/index.js";
 import { createGatewayOrder, verifyPaymentSignature } from "../services/razorpayService.js";
 import { commitStock, releaseStock, notifyAdmin, genSlipNo, derivePaymentStatus } from "../services/orderHelpers.js";
+import { dispatchOrderEvent } from "../services/notify.js";
 
 const MIN_ADVANCE_PCT = 0.20;
 
@@ -111,6 +112,7 @@ const checkout = async (req, res) => {
                 `Advance ₹${advance} to be confirmed for order #${order.id}.`,
                 order.id, t);
             await t.commit();
+            dispatchOrderEvent("order_placed", order.id, { advance });
             return res.status(201).json({
                 mode: "cash",
                 order_id: order.id,
@@ -180,6 +182,7 @@ const verifyAdvancePayment = async (req, res) => {
         await confirmAdvanceAndProgress(order, parseFloat(payment.amount), "online", t);
 
         await t.commit();
+        dispatchOrderEvent("advance_confirmed", order.id);
         return res.json({ message: "Payment successful. Order confirmed.", order_id: order.id });
     } catch (err) {
         await t.rollback();
@@ -322,6 +325,7 @@ const verifyFinalPayment = async (req, res) => {
             `Customer paid balance ₹${payment.amount} online. Ready for handover.`, order.id, t);
 
         await t.commit();
+        dispatchOrderEvent("payment_received", order.id, { amount: payment.amount });
         return res.json({ message: "Balance paid. Thank you!", order_id: order.id });
     } catch (err) {
         await t.rollback();
