@@ -17,6 +17,7 @@ import adminProductRouter from "./admin/routes/adminProductRouter.js";
 import adminCategoryRouter from "./admin/routes/adminCategoryRouter.js";
 import adminOrderRouter from "./admin/routes/adminOrderRouter.js";
 import adminUserRouter from "./admin/routes/adminUserRouter.js";
+import adminNotificationRouter from "./admin/routes/adminNotificationRouter.js";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -36,6 +37,7 @@ app.use("/admin/api/products", adminProductRouter);
 app.use("/admin/api/categories", adminCategoryRouter);
 app.use("/admin/api/orders", adminOrderRouter);
 app.use("/admin/api/users", adminUserRouter);
+app.use("/admin/api/notifications", adminNotificationRouter);
 
 app.get("/", (req, res) => res.json({ message: "E-Commerce API running." }));
 

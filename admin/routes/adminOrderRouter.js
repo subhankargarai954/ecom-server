@@ -1,10 +1,11 @@
 import express from "express";
 import {
     getAllOrders, getOrderById,
-    confirmOrder, setFinalDeliveryDate, markDelivered,
+    confirmAdvance, startProduction, markReady, markDelivered,
     adminCancelOrder, markRefundIssued,
     getPendingDues, collectDue,
 } from "../controllers/adminOrderController.js";
+import { getInvoiceData, downloadInvoicePdf } from "../../controllers/invoiceController.js";
 import { adminMiddleware } from "../../middleware/adminMiddleware.js";
 
 const router = express.Router();
@@ -13,8 +14,11 @@ router.use(adminMiddleware);
 router.get("/", getAllOrders);
 router.get("/pending-dues", getPendingDues);
 router.get("/:id", getOrderById);
-router.put("/:id/confirm", confirmOrder);
-router.put("/:id/delivery-date", setFinalDeliveryDate);
+router.get("/:id/invoice", getInvoiceData(true));
+router.get("/:id/invoice.pdf", downloadInvoicePdf(true));
+router.put("/:id/confirm-advance", confirmAdvance);
+router.put("/:id/production", startProduction);
+router.put("/:id/ready", markReady);
 router.put("/:id/deliver", markDelivered);
 router.put("/:id/cancel", adminCancelOrder);
 router.put("/:id/refund", markRefundIssued);

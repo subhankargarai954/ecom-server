@@ -8,6 +8,8 @@ import ProductImage from "./ProductImage.js";
 import Cart from "./Cart.js";
 import Order from "./Order.js";
 import OrderItem from "./OrderItem.js";
+import Payment from "./Payment.js";
+import Notification from "./Notification.js";
 
 // Category → Product
 Category.hasMany(Product, { foreignKey: "category_id", as: "products", onDelete: "SET NULL" });
@@ -49,6 +51,14 @@ OrderItem.belongsTo(Product, { foreignKey: "product_id", as: "product" });
 ProductVariant.hasMany(OrderItem, { foreignKey: "variant_id", as: "order_entries" });
 OrderItem.belongsTo(ProductVariant, { foreignKey: "variant_id", as: "variant" });
 
+// Order → Payment
+Order.hasMany(Payment, { foreignKey: "order_id", as: "payments", onDelete: "RESTRICT" });
+Payment.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+
+// Order → Notification (optional link)
+Order.hasMany(Notification, { foreignKey: "order_id", as: "notifications" });
+Notification.belongsTo(Order, { foreignKey: "order_id", as: "order" });
+
 export {
     sequelize,
     User,
@@ -59,4 +69,6 @@ export {
     Cart,
     Order,
     OrderItem,
+    Payment,
+    Notification,
 };
