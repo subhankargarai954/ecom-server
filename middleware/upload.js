@@ -22,11 +22,20 @@ const upload = multer({
     },
 });
 
-// Wraps the stream-based cloudinary upload into a Promise
+// Wraps the stream-based cloudinary upload into a Promise.
+// Every product image is normalized to a uniform 800x800 SQUARE so all
+// cards/galleries share the exact same dimensions. `crop: "fill"` resizes
+// then center-crops, and `gravity: "auto"` keeps the most important part of
+// the image in frame. This matches the square (aspect-ratio: 1) product card.
 const uploadToCloudinary = (buffer) =>
     new Promise((resolve, reject) => {
         const stream = cloudinary.uploader.upload_stream(
-            { folder: "ecom-products", transformation: [{ width: 1200, height: 1200, crop: "limit", quality: "auto" }] },
+            {
+                folder: "ecom-products",
+                transformation: [
+                    { width: 800, height: 800, crop: "fill", gravity: "auto", quality: "auto" },
+                ],
+            },
             (err, result) => (err ? reject(err) : resolve(result))
         );
         stream.end(buffer);
