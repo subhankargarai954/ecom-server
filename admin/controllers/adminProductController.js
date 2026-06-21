@@ -1,162 +1,257 @@
-// adminProductController.js
-
-import pool from "../../config/pool.js";
-import axios from "axios";
-
-const isImageLoadable = async (url) => {
-    try {
-        const response = await axios.get(url, { responseType: "arraybuffer" });
-        return response.status === 200;
-    } catch (error) {
-        return false;
-    }
-};
+import { cloudinary, uploadToCloudinary } from "../../middleware/upload.js";
+import { sequelize, Product, ProductVariant, ProductImage, Category } from "../../models/index.js";
 
 const getAllProducts = async (req, res) => {
     try {
-        const response = await pool.query(`select * from product`);
-        return res.json({ products: response.rows });
-    } catch (error) {
-        console.error(`getAllProducts error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch products" });
+        const products = await Product.findAll({
+            include: [
+                { model: ProductImage, as: "images", order: [["display_order", "ASC"]] },
+                { model: ProductVariant, as: "variants" },
+                { model: Category, as: "category", attributes: ["id", "name"] },
+            ],
+            order: [["created_at", "DESC"]],
+        });
+        return res.json({ products });
+    } catch (err) {
+        console.error("getAllProducts error:", err.message);
+        return res.status(500).json({ error: "Failed to fetch products." });
     }
 };
 
-const getCategoryName = async (req, res) => {
-    const categoryId = req.params.id;
+const getProductById = async (req, res) => {
     try {
-        const response = await pool.query(
-            `select name from category where id = $1`,
-            [categoryId]
-        );
-        if (!response.rowCount)
-            return res.status(404).json({ error: "Category not found" });
-        return res.json(response.rows[0]);
-    } catch (error) {
-        console.error(`getCategoryName error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch category" });
+        const product = await Product.findByPk(req.params.id, {
+            include: [
+                { model: ProductImage, as: "images", order: [["display_order", "ASC"]] },
+                { model: ProductVariant, as: "variants" },
+                { model: Category, as: "category" },
+            ],
+        });
+        if (!product) return res.status(404).json({ error: "Product not found." });
+        return res.json({ product });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to fetch product." });
     }
 };
 
-const getProductImages = async (req, res) => {
-    const productId = req.params.id;
+const createProduct = async (req, res) => {
+    const { name, name_bn, category_id, base_price, discount_percent, description, description_bn, available_quantity, variants } = req.body;
+    if (!name || !base_price) return res.status(400).json({ error: "Name and base price are required." });
+
+    const t = await sequelize.transaction();
     try {
-        const response = await pool.query(
-            `select image_url from product_img where id = $1`,
-            [productId]
-        );
-        return res.json(response.rows);
-    } catch (error) {
-        console.error(`getProductImages error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch product images" });
+        const product = await Product.create({
+            name, name_bn, category_id: category_id || null,
+            base_price, discount_percent: discount_percent || 0,
+            description, description_bn, available_quantity: available_quantity || 0,
+        }, { transaction: t });
+
+        if (variants && Array.isArray(variants) && variants.length > 0) {
+            for (const v of variants) {
+                await ProductVariant.create({
+                    product_id: product.id,
+                    variant_name: v.variant_name,
+                    price_override: v.price_override || null,
+                    available_quantity: v.available_quantity || 0,
+                }, { transaction: t });
+            }
+        }
+
+        await t.commit();
+        const full = await Product.findByPk(product.id, {
+            include: [{ model: ProductVariant, as: "variants" }, { model: ProductImage, as: "images" }],
+        });
+        return res.status(201).json({ product: full });
+    } catch (err) {
+        await t.rollback();
+        console.error("createProduct error:", err.message);
+        return res.status(500).json({ error: "Failed to create product." });
     }
 };
 
-const getAllCategoryName = async (req, res) => {
+const updateProduct = async (req, res) => {
+    const { name, name_bn, category_id, base_price, discount_percent, description, description_bn, available_quantity, is_active } = req.body;
     try {
-        const response = await pool.query(`select * from category`);
-        return res.json({ categories: response.rows });
-    } catch (error) {
-        console.error(`getAllCategoryName error: ${error.message}`);
-        return res.status(500).json({ error: "Failed to fetch categories" });
-    }
-};
+        const [updated] = await Product.update({
+            name, name_bn, category_id, base_price, discount_percent, description, description_bn, available_quantity, is_active,
+            updated_at: new Date(),
+        }, { where: { id: req.params.id } });
 
-const storeProduct = async (req, res) => {
-    const { prodId, prodName, prodImage, prodPrice, prodCategoryId, prodDetails } =
-        req.body;
-
-    if (prodId) {
-        try {
-            const response = await pool.query(
-                `update product set name = $1, image = $2, price = $3, more_info = $4, category_id = $5 where id = $6 returning *`,
-                [prodName, prodImage, prodPrice, prodDetails, prodCategoryId, prodId]
-            );
-            return res.json({ product: response.rows[0] });
-        } catch (error) {
-            console.error(`storeProduct update error: ${error.message}`);
-            return res.status(500).json({ error: error.message });
-        }
-    } else {
-        try {
-            const response = await pool.query(
-                `insert into product (name, image, category_id, price, more_info) values($1, $2, $3, $4, $5) returning *`,
-                [prodName, prodImage, prodCategoryId, prodPrice, prodDetails]
-            );
-            if (response.rowCount)
-                return res.json({ product: response.rows[0] });
-            else
-                return res.status(500).json({ error: "Error adding Product" });
-        } catch (error) {
-            console.error(`storeProduct insert error: ${error.message}`);
-            return res.status(500).json({ error: error.message });
-        }
-    }
-};
-
-const storeProductImages = async (req, res) => {
-    const { images, productId } = req.body;
-
-    try {
-        const existing = await pool.query(
-            `SELECT * FROM product_img WHERE id = $1`,
-            [productId]
-        );
-        if (existing.rowCount > 0) {
-            await pool.query(`DELETE FROM product_img WHERE id = $1`, [productId]);
-        }
-
-        const loadableImages = [];
-        for (const imageUrl of images) {
-            if (await isImageLoadable(imageUrl)) loadableImages.push(imageUrl);
-        }
-
-        try {
-            const allInsertedImages = (
-                await Promise.all(
-                    loadableImages.map(async (image_url) => {
-                        const insertResponse = await pool.query(
-                            `INSERT INTO product_img (id, image_url) VALUES ($1, $2) ON CONFLICT (id, image_url) DO NOTHING RETURNING *`,
-                            [productId, image_url]
-                        );
-                        return insertResponse.rowCount
-                            ? insertResponse.rows[0].image_url
-                            : null;
-                    })
-                )
-            ).filter((image) => image !== null);
-
-            return res.json({ images: allInsertedImages });
-        } catch (error) {
-            console.error(`storeProductImages insert error: ${error.message}`);
-            return res.status(500).json({ error: error.message });
-        }
-    } catch (error) {
-        console.error(`storeProductImages error: ${error.message}`);
-        return res.status(500).json({ error: error.message });
+        if (!updated) return res.status(404).json({ error: "Product not found." });
+        const product = await Product.findByPk(req.params.id, {
+            include: [{ model: ProductVariant, as: "variants" }, { model: ProductImage, as: "images" }],
+        });
+        return res.json({ product });
+    } catch (err) {
+        console.error("updateProduct error:", err.message);
+        return res.status(500).json({ error: "Failed to update product." });
     }
 };
 
 const deleteProduct = async (req, res) => {
-    const prodId = parseInt(req.params.id, 10);
     try {
-        const response = await pool.query(
-            `delete from product where id = $1 returning *`,
-            [prodId]
+        const product = await Product.findByPk(req.params.id, {
+            include: [{ model: ProductImage, as: "images" }],
+        });
+        if (!product) return res.status(404).json({ error: "Product not found." });
+
+        for (const img of product.images) {
+            try {
+                const parts = img.image_url.split("/upload/");
+                if (parts.length > 1) {
+                    const publicId = parts[1].replace(/\.[^.]+$/, ""); // remove extension
+                    await cloudinary.uploader.destroy(publicId);
+                }
+            } catch {}
+        }
+
+        await product.destroy();
+        return res.json({ message: "Product deleted." });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to delete product." });
+    }
+};
+
+// Variant management
+const addVariant = async (req, res) => {
+    const { variant_name, price_override, available_quantity } = req.body;
+    if (!variant_name) return res.status(400).json({ error: "Variant name is required." });
+    try {
+        const variant = await ProductVariant.create({
+            product_id: req.params.id,
+            variant_name,
+            price_override: price_override || null,
+            available_quantity: available_quantity || 0,
+        });
+        return res.status(201).json({ variant });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to add variant." });
+    }
+};
+
+const updateVariant = async (req, res) => {
+    const { variant_name, price_override, available_quantity, is_active } = req.body;
+    try {
+        const [updated] = await ProductVariant.update(
+            { variant_name, price_override, available_quantity, is_active },
+            { where: { id: req.params.variant_id, product_id: req.params.id } }
         );
-        return res.json({ product: response.rows[0] });
-    } catch (error) {
-        console.error(`deleteProduct error: ${error.message}`);
-        return res.status(500).json({ error: error.message });
+        if (!updated) return res.status(404).json({ error: "Variant not found." });
+        const variant = await ProductVariant.findByPk(req.params.variant_id);
+        return res.json({ variant });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to update variant." });
+    }
+};
+
+const deleteVariant = async (req, res) => {
+    try {
+        const deleted = await ProductVariant.destroy({
+            where: { id: req.params.variant_id, product_id: req.params.id },
+        });
+        if (!deleted) return res.status(404).json({ error: "Variant not found." });
+        return res.json({ message: "Variant deleted." });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to delete variant." });
+    }
+};
+
+// Add newly-manufactured units to physical on-hand stock (product or variant).
+const addStock = async (req, res) => {
+    const qty = parseInt(req.body.quantity, 10);
+    const { variant_id } = req.body;
+    if (!qty || qty <= 0) return res.status(400).json({ error: "Enter a positive quantity to add." });
+    try {
+        if (variant_id) {
+            const variant = await ProductVariant.findOne({ where: { id: variant_id, product_id: req.params.id } });
+            if (!variant) return res.status(404).json({ error: "Variant not found." });
+            await variant.increment("available_quantity", { by: qty });
+            await variant.reload();
+            return res.json({ message: `Added ${qty} to stock.`, available_quantity: variant.available_quantity });
+        }
+        const product = await Product.findByPk(req.params.id);
+        if (!product) return res.status(404).json({ error: "Product not found." });
+        await product.increment("available_quantity", { by: qty });
+        await product.reload();
+        return res.json({ message: `Added ${qty} to stock.`, available_quantity: product.available_quantity });
+    } catch (err) {
+        console.error("addStock error:", err.message);
+        return res.status(500).json({ error: "Failed to add stock." });
+    }
+};
+
+// Image upload: receives files via multer (memory), uploads to Cloudinary
+const uploadImages = async (req, res) => {
+    const product_id = req.params.id;
+
+    try {
+        if (!req.files || req.files.length === 0)
+            return res.status(400).json({ error: "No files uploaded." });
+
+        const coverIndex = parseInt(req.body.cover_index ?? 0);
+
+        // Upload all buffers to Cloudinary
+        const uploadResults = await Promise.all(
+            req.files.map((file) => uploadToCloudinary(file.buffer))
+        );
+
+        // Clear old images from DB (Cloudinary files are kept unless explicitly deleted)
+        await ProductImage.destroy({ where: { product_id } });
+
+        const images = await Promise.all(
+            uploadResults.map((result, i) =>
+                ProductImage.create({
+                    product_id,
+                    image_url: result.secure_url,
+                    is_cover: i === coverIndex,
+                    display_order: i,
+                })
+            )
+        );
+
+        return res.json({ images });
+    } catch (err) {
+        console.error("uploadImages error:", err.message);
+        return res.status(500).json({ error: "Failed to upload images." });
+    }
+};
+
+const setCoverImage = async (req, res) => {
+    const { image_id } = req.body;
+    const product_id = req.params.id;
+    try {
+        await ProductImage.update({ is_cover: false }, { where: { product_id } });
+        await ProductImage.update({ is_cover: true }, { where: { id: image_id, product_id } });
+        return res.json({ message: "Cover image updated." });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to update cover image." });
+    }
+};
+
+const deleteImage = async (req, res) => {
+    try {
+        const image = await ProductImage.findOne({
+            where: { id: req.params.image_id, product_id: req.params.id },
+        });
+        if (!image) return res.status(404).json({ error: "Image not found." });
+
+        try {
+            const parts = image.image_url.split("/upload/");
+            if (parts.length > 1) {
+                const publicId = parts[1].replace(/\.[^.]+$/, "");
+                await cloudinary.uploader.destroy(publicId);
+            }
+        } catch {}
+
+        await image.destroy();
+        return res.json({ message: "Image deleted." });
+    } catch (err) {
+        return res.status(500).json({ error: "Failed to delete image." });
     }
 };
 
 export {
-    getAllProducts,
-    getCategoryName,
-    getProductImages,
-    getAllCategoryName,
-    storeProduct,
-    storeProductImages,
-    deleteProduct,
+    getAllProducts, getProductById, createProduct, updateProduct, deleteProduct,
+    addVariant, updateVariant, deleteVariant, addStock,
+    uploadImages, setCoverImage, deleteImage,
 };
