@@ -156,6 +156,30 @@ const deleteVariant = async (req, res) => {
     }
 };
 
+// Add newly-manufactured units to physical on-hand stock (product or variant).
+const addStock = async (req, res) => {
+    const qty = parseInt(req.body.quantity, 10);
+    const { variant_id } = req.body;
+    if (!qty || qty <= 0) return res.status(400).json({ error: "Enter a positive quantity to add." });
+    try {
+        if (variant_id) {
+            const variant = await ProductVariant.findOne({ where: { id: variant_id, product_id: req.params.id } });
+            if (!variant) return res.status(404).json({ error: "Variant not found." });
+            await variant.increment("available_quantity", { by: qty });
+            await variant.reload();
+            return res.json({ message: `Added ${qty} to stock.`, available_quantity: variant.available_quantity });
+        }
+        const product = await Product.findByPk(req.params.id);
+        if (!product) return res.status(404).json({ error: "Product not found." });
+        await product.increment("available_quantity", { by: qty });
+        await product.reload();
+        return res.json({ message: `Added ${qty} to stock.`, available_quantity: product.available_quantity });
+    } catch (err) {
+        console.error("addStock error:", err.message);
+        return res.status(500).json({ error: "Failed to add stock." });
+    }
+};
+
 // Image upload: receives files via multer (memory), uploads to Cloudinary
 const uploadImages = async (req, res) => {
     const product_id = req.params.id;
@@ -228,6 +252,6 @@ const deleteImage = async (req, res) => {
 
 export {
     getAllProducts, getProductById, createProduct, updateProduct, deleteProduct,
-    addVariant, updateVariant, deleteVariant,
+    addVariant, updateVariant, deleteVariant, addStock,
     uploadImages, setCoverImage, deleteImage,
 };

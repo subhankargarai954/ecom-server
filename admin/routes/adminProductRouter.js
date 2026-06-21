@@ -1,7 +1,7 @@
 import express from "express";
 import {
     getAllProducts, getProductById, createProduct, updateProduct, deleteProduct,
-    addVariant, updateVariant, deleteVariant,
+    addVariant, updateVariant, deleteVariant, addStock,
     uploadImages, setCoverImage, deleteImage,
 } from "../controllers/adminProductController.js";
 import { adminMiddleware } from "../../middleware/adminMiddleware.js";
@@ -15,6 +15,9 @@ router.get("/:id", getProductById);
 router.post("/", createProduct);
 router.put("/:id", updateProduct);
 router.delete("/:id", deleteProduct);
+
+// Add manufactured units to on-hand stock (product or variant).
+router.post("/:id/add-stock", addStock);
 
 // Variant routes
 router.post("/:id/variants", addVariant);

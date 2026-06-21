@@ -1,4 +1,5 @@
 import { Cart, Product, ProductVariant, ProductImage } from "../models/index.js";
+import { getReservedMap, reservedFor, shownAvailable } from "../services/stock.js";
 
 const getCart = async (req, res) => {
     try {
@@ -15,7 +16,15 @@ const getCart = async (req, res) => {
                 { model: ProductVariant, as: "variant" },
             ],
         });
-        return res.json({ cart: items });
+        // Show free-to-order quantity (on-hand − reserved) so the cap matches listings.
+        const reservedMap = await getReservedMap(items.map((i) => i.product?.id).filter(Boolean));
+        const cart = items.map((i) => {
+            const obj = i.toJSON();
+            if (obj.product) obj.product.available_quantity = shownAvailable(obj.product.available_quantity, reservedFor(reservedMap, obj.product.id, null));
+            if (obj.variant) obj.variant.available_quantity = shownAvailable(obj.variant.available_quantity, reservedFor(reservedMap, obj.product.id, obj.variant.id));
+            return obj;
+        });
+        return res.json({ cart });
     } catch (err) {
         console.error("getCart error:", err.message);
         return res.status(500).json({ error: "Failed to fetch cart." });

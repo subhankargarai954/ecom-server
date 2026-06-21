@@ -3,7 +3,7 @@ import {
     getAllOrders, getOrderById,
     confirmAdvance, startProduction, markReady, markDelivered,
     adminCancelOrder, markRefundIssued,
-    getPendingDues, collectDue,
+    getPendingDues, collectDue, confirmCashDue, rejectCashDue,
     getOrderMessages, resendMessage,
 } from "../controllers/adminOrderController.js";
 import { getInvoiceData, downloadInvoicePdf } from "../../controllers/invoiceController.js";
@@ -26,5 +26,7 @@ router.put("/:id/deliver", markDelivered);
 router.put("/:id/cancel", adminCancelOrder);
 router.put("/:id/refund", markRefundIssued);
 router.put("/:id/collect-due", collectDue);
+router.put("/:id/confirm-due", confirmCashDue);
+router.put("/:id/reject-due", rejectCashDue);
 
 export default router;

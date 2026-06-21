@@ -1,7 +1,12 @@
 import { sequelize, Cart, Order, OrderItem, Payment, Product, ProductVariant, ProductImage } from "../models/index.js";
 import { createGatewayOrder, verifyPaymentSignature } from "../services/razorpayService.js";
-import { commitStock, releaseStock, notifyAdmin, genSlipNo, derivePaymentStatus } from "../services/orderHelpers.js";
+import { commitStock, releaseStock, notifyAdmin, slipNo } from "../services/orderHelpers.js";
+
+// Statuses for which a balance/final payment is valid (advance already confirmed,
+// order not cancelled). Used to gate the online final-payment endpoints.
+const FINAL_PAYABLE_STATUSES = ["confirmed", "in_production", "ready_for_pickup", "delivered"];
 import { dispatchOrderEvent } from "../services/notify.js";
+import { getReservedMap, reservedFor, shownAvailable } from "../services/stock.js";
 
 const MIN_ADVANCE_PCT = 0.20;
 
@@ -13,6 +18,10 @@ async function buildFromCart(user_id, t) {
         transaction: t,
     });
     if (!cartItems.length) return null;
+
+    // Availability is on-hand minus what other confirmed orders already reserve.
+    const productIds = [...new Set(cartItems.map((c) => c.product.id))];
+    const reservedMap = await getReservedMap(productIds, t);
 
     let total_amount = 0;
     let all_items_available = true;
@@ -26,8 +35,10 @@ async function buildFromCart(user_id, t) {
         const discount = parseFloat(product.discount_percent) || 0;
         const effective = unit_price * (1 - discount / 100);
 
-        const qtyAvailable = variant ? variant.available_quantity : product.available_quantity;
-        const wasAvailable = qtyAvailable >= item.quantity;
+        const onHand = variant ? variant.available_quantity : product.available_quantity;
+        const reserved = reservedFor(reservedMap, product.id, variant ? variant.id : null);
+        const freeToOrder = shownAvailable(onHand, reserved);
+        const wasAvailable = freeToOrder >= item.quantity;
         if (!wasAvailable) all_items_available = false;
 
         total_amount += effective * item.quantity;
@@ -92,7 +103,6 @@ const checkout = async (req, res) => {
         }
 
         // advance payment record (pending until confirmed)
-        const slip_no = await genSlipNo(order.id, "advance", t);
         const payment = await Payment.create({
             order_id: order.id,
             payment_type: "advance",
@@ -100,8 +110,8 @@ const checkout = async (req, res) => {
             amount: advance,
             status: "pending",
             gateway: payment_method === "cash" ? "cash" : null,
-            slip_no,
         }, { transaction: t });
+        await payment.update({ slip_no: slipNo(order.id, "advance", payment.id) }, { transaction: t });
 
         // clear cart (order is now placed/awaiting payment)
         await Cart.destroy({ where: { user_id }, transaction: t });
@@ -165,6 +175,17 @@ const verifyAdvancePayment = async (req, res) => {
             where: { id: payment_id, order_id: order.id, payment_type: "advance" }, transaction: t,
         });
         if (!payment) { await t.rollback(); return res.status(404).json({ error: "Payment not found." }); }
+
+        // Idempotent: a replayed/duplicate verify must not re-progress the order.
+        if (payment.status === "confirmed") {
+            await t.commit();
+            return res.json({ message: "Payment already confirmed.", order_id: order.id });
+        }
+        // Online advance only applies while the order is awaiting its advance.
+        if (order.order_status !== "awaiting_payment") {
+            await t.rollback();
+            return res.status(400).json({ error: "Order is not awaiting payment." });
+        }
 
         const ok = verifyPaymentSignature({
             gateway_order_id: payment.gateway_order_id, gateway_payment_id, signature,
@@ -244,11 +265,11 @@ const payAdvanceOnline = async (req, res) => {
         const amount = payment ? parseFloat(payment.amount) : parseFloat((order.total_amount * MIN_ADVANCE_PCT).toFixed(2));
         const gw = await createGatewayOrder({ amount, receipt: `adv_${order.id}`, notes: { order_id: order.id } });
         if (!payment) {
-            const slip_no = await genSlipNo(order.id, "advance", t);
             payment = await Payment.create({
                 order_id: order.id, payment_type: "advance", method: "online", amount,
-                status: "pending", gateway: gw.gateway, gateway_order_id: gw.gateway_order_id, slip_no,
+                status: "pending", gateway: gw.gateway, gateway_order_id: gw.gateway_order_id,
             }, { transaction: t });
+            await payment.update({ slip_no: slipNo(order.id, "advance", payment.id) }, { transaction: t });
         } else {
             await payment.update({ gateway: gw.gateway, gateway_order_id: gw.gateway_order_id, method: "online" }, { transaction: t });
         }
@@ -271,15 +292,35 @@ const payFinalOnline = async (req, res) => {
     try {
         const order = await Order.findOne({ where: { id: req.params.id, user_id: req.user.id }, transaction: t });
         if (!order) { await t.rollback(); return res.status(404).json({ error: "Order not found." }); }
+        // Only a placed (advance-confirmed), non-cancelled order can take a balance payment.
+        if (!FINAL_PAYABLE_STATUSES.includes(order.order_status)) {
+            await t.rollback(); return res.status(400).json({ error: "This order is not awaiting a balance payment." });
+        }
         const balance = parseFloat(order.total_amount) - parseFloat(order.advance_paid) - parseFloat(order.final_paid);
         if (balance <= 0.01) { await t.rollback(); return res.status(400).json({ error: "Nothing left to pay." }); }
+        // Razorpay (and most gateways) require a minimum of ₹1. Tiny residual
+        // balances can only be settled in cash at the store.
+        if (balance < 1) {
+            await t.rollback();
+            return res.status(400).json({ error: `This balance (₹${balance.toFixed(2)}) is too small to pay online. Please pay it in cash at the store.` });
+        }
 
         const gw = await createGatewayOrder({ amount: balance, receipt: `fin_${order.id}`, notes: { order_id: order.id, type: "final" } });
-        const slip_no = await genSlipNo(order.id, "final", t);
-        const payment = await Payment.create({
-            order_id: order.id, payment_type: "final", method: "online", amount: balance,
-            status: "pending", gateway: gw.gateway, gateway_order_id: gw.gateway_order_id, slip_no,
-        }, { transaction: t });
+        // Reuse an open pending final payment instead of creating duplicates.
+        let payment = await Payment.findOne({
+            where: { order_id: order.id, payment_type: "final", status: "pending" }, transaction: t,
+        });
+        if (!payment) {
+            payment = await Payment.create({
+                order_id: order.id, payment_type: "final", method: "online", amount: balance,
+                status: "pending", gateway: gw.gateway, gateway_order_id: gw.gateway_order_id,
+            }, { transaction: t });
+            await payment.update({ slip_no: slipNo(order.id, "final", payment.id) }, { transaction: t });
+        } else {
+            await payment.update({
+                amount: balance, method: "online", gateway: gw.gateway, gateway_order_id: gw.gateway_order_id,
+            }, { transaction: t });
+        }
         await t.commit();
         return res.json({
             order_id: order.id, payment_id: payment.id, gateway: gw.gateway,
@@ -288,6 +329,48 @@ const payFinalOnline = async (req, res) => {
     } catch (err) {
         await t.rollback();
         return res.status(500).json({ error: "Failed to initiate final payment." });
+    }
+};
+
+// =====================================================================
+// POST /api/orders/:id/pay-final/cash  (customer requests to pay balance in cash)
+// Creates/updates a PENDING final payment and notifies the admin to confirm on
+// collection — mirrors the cash-advance "request + admin approval" flow.
+// =====================================================================
+const requestCashDue = async (req, res) => {
+    const t = await sequelize.transaction();
+    try {
+        const order = await Order.findOne({ where: { id: req.params.id, user_id: req.user.id }, transaction: t });
+        if (!order) { await t.rollback(); return res.status(404).json({ error: "Order not found." }); }
+        if (!FINAL_PAYABLE_STATUSES.includes(order.order_status)) {
+            await t.rollback(); return res.status(400).json({ error: "This order is not awaiting a balance payment." });
+        }
+        const balance = parseFloat(order.total_amount) - parseFloat(order.advance_paid) - parseFloat(order.final_paid);
+        if (balance <= 0.01) { await t.rollback(); return res.status(400).json({ error: "Nothing left to pay." }); }
+
+        // Reuse the open pending final payment (if any) so cash/online stay one row.
+        let payment = await Payment.findOne({
+            where: { order_id: order.id, payment_type: "final", status: "pending" }, transaction: t,
+        });
+        if (!payment) {
+            payment = await Payment.create({
+                order_id: order.id, payment_type: "final", method: "cash", amount: balance,
+                status: "pending", gateway: "cash",
+            }, { transaction: t });
+            await payment.update({ slip_no: slipNo(order.id, "final", payment.id) }, { transaction: t });
+        } else {
+            await payment.update({ method: "cash", gateway: "cash", amount: balance, gateway_order_id: null }, { transaction: t });
+        }
+
+        await notifyAdmin("due_cash_requested", `Cash due requested — order #${order.id}`,
+            `Customer wants to pay the ₹${balance.toFixed(2)} balance in cash. Confirm once received.`, order.id, t);
+
+        await t.commit();
+        return res.json({ message: "Cash payment requested. The store will confirm once received.", order_id: order.id });
+    } catch (err) {
+        await t.rollback();
+        console.error("requestCashDue error:", err.message);
+        return res.status(500).json({ error: "Failed to request cash payment." });
     }
 };
 
@@ -303,6 +386,15 @@ const verifyFinalPayment = async (req, res) => {
         });
         if (!payment) { await t.rollback(); return res.status(404).json({ error: "Payment not found." }); }
 
+        // Idempotent: a replayed/duplicate verify must not add the amount twice.
+        if (payment.status === "confirmed") {
+            await t.commit();
+            return res.json({ message: "Payment already confirmed.", order_id: order.id });
+        }
+        if (!FINAL_PAYABLE_STATUSES.includes(order.order_status)) {
+            await t.rollback(); return res.status(400).json({ error: "This order is not awaiting a balance payment." });
+        }
+
         const ok = verifyPaymentSignature({ gateway_order_id: payment.gateway_order_id, gateway_payment_id, signature });
         if (!ok) {
             await payment.update({ status: "failed" }, { transaction: t });
@@ -311,13 +403,16 @@ const verifyFinalPayment = async (req, res) => {
         }
         await payment.update({ status: "confirmed", gateway_payment_id, gateway_signature: signature, confirmed_at: new Date() }, { transaction: t });
 
-        const newFinal = parseFloat(order.final_paid) + parseFloat(payment.amount);
+        // Cap so advance + final can never exceed the order total.
+        const maxFinal = parseFloat(order.total_amount) - parseFloat(order.advance_paid);
+        const newFinal = Math.min(parseFloat(order.final_paid) + parseFloat(payment.amount), maxFinal);
+        const fullyPaid = parseFloat(order.advance_paid) + newFinal >= parseFloat(order.total_amount) - 0.01;
         await order.update({
             final_paid: newFinal,
             final_payment_mode: "online",
-            final_confirmed: true,
-            final_confirmed_at: new Date(),
-            payment_status: "fully_paid",
+            final_confirmed: fullyPaid,
+            final_confirmed_at: fullyPaid ? new Date() : order.final_confirmed_at,
+            payment_status: fullyPaid ? "fully_paid" : (order.order_status === "delivered" ? "pending_after_delivery" : "advance_paid"),
             updated_at: new Date(),
         }, { transaction: t });
 
@@ -410,6 +505,6 @@ const cancelOrder = async (req, res) => {
 
 export {
     checkout, verifyAdvancePayment, payAdvanceOnline,
-    payFinalOnline, verifyFinalPayment,
+    payFinalOnline, requestCashDue, verifyFinalPayment,
     getMyOrders, getOrderById, cancelOrder,
 };

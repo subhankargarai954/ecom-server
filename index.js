@@ -10,6 +10,7 @@ import authRouter from "./routes/authRoutes.js";
 import productRouter from "./routes/productRoutes.js";
 import cartRouter from "./routes/cartRoutes.js";
 import orderRouter from "./routes/orderRoutes.js";
+import notificationRouter from "./routes/notificationRoutes.js";
 
 // Admin routes
 import adminAuthRouter from "./admin/routes/adminAuthRouter.js";
@@ -30,6 +31,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/products", productRouter);
 app.use("/api/cart", cartRouter);
 app.use("/api/orders", orderRouter);
+app.use("/api/notifications", notificationRouter);
 
 // Admin API
 app.use("/admin/api/auth", adminAuthRouter);
